@@ -3918,6 +3918,23 @@ class APIServerAdapter(BasePlatformAdapter):
             headers=response_headers,
         )
 
+    async def _handle_list_runs(self, request: "web.Request") -> "web.Response":
+        """GET /v1/runs — list all active (non-terminal) runs with session info."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        terminal = {"completed", "failed", "cancelled", "expired"}
+        active = [
+            s for s in self._run_statuses.values()
+            if s.get("status") not in terminal
+        ]
+        active.sort(key=lambda s: s.get("created_at", 0), reverse=True)
+        return web.json_response({
+            "object": "list",
+            "data": active,
+        })
+
     async def _handle_get_run(self, request: "web.Request") -> "web.Response":
         """GET /v1/runs/{run_id} — return pollable run status for external UIs."""
         auth_err = self._check_auth(request)
@@ -4191,6 +4208,7 @@ class APIServerAdapter(BasePlatformAdapter):
             self._app.router.add_post("/api/jobs/{job_id}/resume", self._handle_resume_job)
             self._app.router.add_post("/api/jobs/{job_id}/run", self._handle_run_job)
             # Structured event streaming
+            self._app.router.add_get("/v1/runs", self._handle_list_runs)
             self._app.router.add_post("/v1/runs", self._handle_runs)
             self._app.router.add_get("/v1/runs/{run_id}", self._handle_get_run)
             self._app.router.add_get("/v1/runs/{run_id}/events", self._handle_run_events)
