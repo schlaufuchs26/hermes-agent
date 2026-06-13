@@ -41,8 +41,14 @@ jobs:
   #      always operates on the latest branch state.
   #   4. Uses a GitHub App token (not GITHUB_TOKEN) so the fix commit
   #      triggers downstream nix.yml verification.
+  # --- Disabled on forks ---------------------------------------------------
+  # This job uses a GitHub App token (actions/create-github-app-token)
+  # via secrets.APP_ID and secrets.APP_PRIVATE_KEY. Forks without these
+  # secrets configured will fail. If you use nix lockfile auto-fix on
+  # main, configure the GitHub App secrets and set this to:
+  #   if: github.event_name == 'push'
   auto-fix-main:
-    if: github.event_name == 'push'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 25
     concurrency:
