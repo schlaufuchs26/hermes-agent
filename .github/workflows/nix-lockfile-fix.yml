@@ -49,14 +49,27 @@ jobs:
       group: auto-fix-main
       cancel-in-progress: true
     steps:
+      - name: Check if GitHub App secrets are available (skip on forks)
+        id: check-secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.APP_ID }}" ] || [ -z "${{ secrets.APP_PRIVATE_KEY }}" ]; then
+            echo "GitHub App secrets not configured (fork); skipping nix lockfile auto-fix"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate GitHub App token
+        if: steps.check-secrets.outputs.skip != 'true'
         id: app-token
         uses: actions/create-github-app-token@7bfa3a4717ef143a604ee0a99d859b8886a96d00  # v1.9.3
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  #
+        if: steps.check-secrets.outputs.skip != 'true' v6.0.2
         with:
           ref: main
           token: ${{ steps.app-token.outputs.token }}
@@ -195,7 +208,8 @@ jobs:
 
             Triggered by @${{ github.actor }} — [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  #
+        if: steps.check-secrets.outputs.skip != 'true' v6.0.2
         with:
           repository: ${{ steps.resolve.outputs.owner }}/${{ steps.resolve.outputs.repo }}
           ref: ${{ steps.resolve.outputs.ref }}
