@@ -11,7 +11,7 @@ from plugins.memory.openviking import OpenVikingMemoryProvider, _VikingClient
 def test_tool_search_sorts_by_raw_score_across_buckets():
     provider = OpenVikingMemoryProvider()
     provider._client = MagicMock()
-    provider._client.post.return_value = {
+    provider._client.post_with_retry.return_value = {
         "result": {
             "memories": [
                 {"uri": "viking://memories/1", "score": 0.9003, "abstract": "memory result"},
@@ -40,7 +40,7 @@ def test_tool_search_sorts_by_raw_score_across_buckets():
 def test_tool_search_sorts_missing_raw_score_after_negative_scores():
     provider = OpenVikingMemoryProvider()
     provider._client = MagicMock()
-    provider._client.post.return_value = {
+    provider._client.post_with_retry.return_value = {
         "result": {
             "memories": [
                 {"uri": "viking://memories/missing", "abstract": "missing score"},

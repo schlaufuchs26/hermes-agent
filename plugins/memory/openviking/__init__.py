@@ -29,8 +29,10 @@ import json
 import logging
 import mimetypes
 import os
+import random
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -45,6 +47,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ENDPOINT = "http://127.0.0.1:1933"
 _TIMEOUT = 30.0
+_SEARCH_RETRY_MAX = 3
+_SEARCH_RETRY_BASE_DELAY = 1.0  # seconds, doubles each retry
+_SEARCH_RETRY_MAX_DELAY = 10.0
+_SEARCH_RETRYABLE_CODES = {"INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"}
 _REMOTE_RESOURCE_PREFIXES = ("http://", "https://", "git@", "ssh://", "git://")
 
 # Maps the viking_remember `category` enum to a viking:// subdirectory.
@@ -181,12 +187,55 @@ class _VikingClient:
         )
         return self._parse_response(resp)
 
-    def post(self, path: str, payload: dict = None, **kwargs) -> dict:
+    def post(self, path: str, payload: Optional[dict] = None, **kwargs) -> dict:
         resp = self._httpx.post(
             self._url(path), json=payload or {}, headers=self._headers(),
             timeout=_TIMEOUT, **kwargs
         )
         return self._parse_response(resp)
+
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """Check if an error from _parse_response is likely transient (rate limit, timeout)."""
+        msg = str(error)
+        for code in _SEARCH_RETRYABLE_CODES:
+            if f"{code}:" in msg or f"{code} " in msg or msg == code:
+                return True
+        # httpx timeout / connection errors
+        try:
+            import httpx
+            if isinstance(error, httpx.TimeoutException):
+                return True
+            if isinstance(error, httpx.ConnectError):
+                return True
+        except ImportError:
+            pass
+        return False
+
+    def post_with_retry(self, path: str, payload: dict = None, **kwargs) -> dict:
+        """POST with retry for transient errors (embedding API rate limits, timeouts).
+
+        Only retries on INTERNAL, UNAVAILABLE, DEADLINE_EXCEEDED errors
+        and httpx timeout/connection errors. Non-retryable errors (e.g.
+        INVALID_ARGUMENT, PERMISSION_DENIED) are raised immediately.
+        """
+        last_error: Optional[Exception] = None
+        for attempt in range(_SEARCH_RETRY_MAX + 1):
+            try:
+                return self.post(path, payload, **kwargs)
+            except Exception as e:
+                last_error = e
+                if attempt >= _SEARCH_RETRY_MAX:
+                    break
+                if not self._is_retryable_error(e):
+                    raise
+                delay = min(
+                    _SEARCH_RETRY_BASE_DELAY * (2 ** attempt),
+                    _SEARCH_RETRY_MAX_DELAY,
+                )
+                jitter = random.uniform(0, delay * 0.25)
+                time.sleep(delay + jitter)
+        assert last_error is not None  # unreachable without exception
+        raise last_error
 
     def upload_temp_file(self, file_path: Path) -> str:
         mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
@@ -750,7 +799,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
         if args.get("limit"):
             payload["top_k"] = args["limit"]
 
-        resp = self._client.post("/api/v1/search/find", payload)
+        resp = self._client.post_with_retry("/api/v1/search/find", payload)
         result = resp.get("result", {})
 
         # Format results for the model — keep it concise
